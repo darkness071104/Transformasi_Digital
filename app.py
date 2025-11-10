@@ -46,7 +46,7 @@ def predict_ai_cnn(text):
     cleaned = clean_text(text)
     seq = tokenizer.texts_to_sequences([cleaned])
     pad = pad_sequences(seq, maxlen=200, padding='post', truncating='post')
-    prob = model.predict(pad)[0][0]
+    prob = float(model.predict(pad)[0][0])
     return prob * 100
 
 # === CONFIG UI ===
