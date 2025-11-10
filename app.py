@@ -1,187 +1,166 @@
-import pandas as pd
-import numpy as np
+import streamlit as st
+import tensorflow as tf
+import pickle
 import re
 import string
-import matplotlib.pyplot as plt
-import seaborn as sns
-import streamlit as st
-import nltk
-from nltk.corpus import stopwords
-from sklearn.model_selection import train_test_split
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    accuracy_score, f1_score, roc_auc_score, classification_report, confusion_matrix
-)
-from sklearn.pipeline import Pipeline
-import plotly.graph_objects as go
+import numpy as np
+from tensorflow.keras.preprocessing.sequence import pad_sequences
 
-# --- Download stopwords jika belum ada
-nltk.download('stopwords')
+# === Load model dan tokenizer ===
+@st.cache_resource
+def load_model_and_tokenizer():
+    model = tf.keras.models.load_model("cnn_text_classifier.h5")
+    with open("tokenizer.pkl", "rb") as f:
+        tokenizer = pickle.load(f)
+    return model, tokenizer
 
-# --- Load data
-@st.cache_data
-def load_data():
-    df = pd.read_csv("balanced_ai_human_prompts.csv")
-    return df
+model, tokenizer = load_model_and_tokenizer()
 
-df = load_data()
-
-# --- Preprocessing function
-stop_words = set(stopwords.words("english"))
-
+# === Fungsi preprocessing ===
 def clean_text(text):
+    stop_words = set([
+        'i','me','my','myself','we','our','ours','ourselves','you',
+        'your','yours','yourself','yourselves','he','him','his','himself',
+        'she','her','hers','herself','it','its','itself','they','them',
+        'their','theirs','themselves','what','which','who','whom','this',
+        'that','these','those','am','is','are','was','were','be','been',
+        'being','have','has','had','having','do','does','did','doing','a',
+        'an','the','and','but','if','or','because','as','until','while',
+        'of','at','by','for','with','about','against','between','into',
+        'through','during','before','after','above','below','to','from',
+        'up','down','in','out','on','off','over','under','again','further',
+        'then','once','here','there','when','where','why','how','all',
+        'any','both','each','few','more','most','other','some','such',
+        'no','nor','not','only','own','same','so','than','too','very',
+        's','t','can','will','just','don','should','now'
+    ])
     text = text.lower()
     text = re.sub(r"http\S+|www\S+|https\S+", "", text)
     text = re.sub(r"\d+", "", text)
     text = text.translate(str.maketrans("", "", string.punctuation))
-    text = " ".join([word for word in text.split() if word not in stop_words])
+    text = " ".join([w for w in text.split() if w not in stop_words])
     return text
 
-df["clean_text"] = df["text"].apply(clean_text)
-df["number_of_words"] = df["text"].apply(lambda x: len(x.split()))
-df["number_of_char"] = df["text"].apply(lambda x: len(x))
-
-# --- Caching model training biar gak retrain terus
-@st.cache_resource
-def train_model():
-    X_train, X_test, y_train, y_test = train_test_split(
-        df["clean_text"], df["generated"],
-        test_size=0.2, random_state=42, stratify=df["generated"]
-    )
-
-    model = Pipeline([
-        ("tfidf", TfidfVectorizer(max_features=5000, ngram_range=(1, 2))),
-        ("clf", LogisticRegression(max_iter=300))
-    ])
-
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
-    y_prob = model.predict_proba(X_test)[:, 1]
-
-    metrics = {
-        "accuracy": accuracy_score(y_test, y_pred),
-        "f1": f1_score(y_test, y_pred),
-        "roc_auc": roc_auc_score(y_test, y_prob),
-        "report": classification_report(y_test, y_pred, output_dict=True),
-        "conf_matrix": confusion_matrix(y_test, y_pred)
-    }
-
-    return model, metrics
-
-model, metrics = train_model()
-
-# --- Fungsi prediksi
-def predict_ai_percentage(text):
+# === Fungsi prediksi ===
+def predict_ai_cnn(text):
     cleaned = clean_text(text)
-    prob = model.predict_proba([cleaned])[0][1]
-    return round(prob * 100, 2)
+    seq = tokenizer.texts_to_sequences([cleaned])
+    pad = pad_sequences(seq, maxlen=200, padding='post', truncating='post')
+    prob = model.predict(pad)[0][0]
+    return prob * 100
 
-# --- Streamlit UI
-st.title("🧠 Deteksi Teks AI vs Human")
-st.write("Model ini memprediksi kemungkinan apakah teks ditulis oleh manusia atau AI berdasarkan analisis linguistik dan pola bahasa.")
-st.markdown("---")
-# --- Sidebar
-with st.sidebar:
-    st.title("🔍 Menu Navigasi")
-    menu = st.selectbox(
-        "Pilih Tampilan:",
-        [
-            "Data Overview",
-            "Distribusi Data",
-            "Evaluasi Model",
-            "Prediksi Teks"
-        ]
-    )
+# === CONFIG UI ===
+st.set_page_config(
+    page_title="AI Text Detector",
+    page_icon="🤖",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
 
-# --- Menu 1: Data Overview
-if menu == "Data Overview":
-    st.header("📋 Data Overview")
-    st.write(df.head(10))
-    st.markdown("---")
-    st.write("Jumlah data:", len(df))
-    st.markdown("---")
-    st.markdown("### Contoh Data Bersih")
-    st.write(df[["text", "clean_text"]].head(5))
+# === CSS THEME: CYBERPUNK ===
+st.markdown("""
+    <style>
+    body {
+        background-color: #0d0d0d;
+        color: #e0e0e0;
+    }
+    .stApp {
+        background: radial-gradient(circle at 20% 30%, #1a0033 0%, #000000 80%);
+        border: 2px solid #6600ff;
+        border-radius: 20px;
+        padding: 40px;
+        box-shadow: 0px 0px 30px rgba(153, 0, 255, 0.6);
+        max-width: 800px;
+        margin: auto;
+    }
+    .title {
+        text-align: center;
+        color: #ff00ff;
+        font-weight: 800;
+        font-size: 2.5em;
+        text-shadow: 0px 0px 10px #ff00ff, 0px 0px 25px #9900ff;
+    }
+    .subtitle {
+        text-align: center;
+        color: #a6a6a6;
+        font-size: 1em;
+        margin-bottom: 2em;
+    }
+    textarea {
+        background-color: rgba(20, 20, 20, 0.8) !important;
+        color: #e0e0e0 !important;
+        border: 1px solid #ff00ff !important;
+        border-radius: 10px !important;
+    }
+    .stButton button {
+        background: linear-gradient(90deg, #ff00ff, #00ffff);
+        color: black;
+        border: none;
+        border-radius: 10px;
+        font-weight: 700;
+        box-shadow: 0 0 15px #00ffff;
+        transition: 0.3s;
+    }
+    .stButton button:hover {
+        box-shadow: 0 0 25px #ff00ff;
+        transform: scale(1.05);
+    }
+    .result-card {
+        border-radius: 15px;
+        padding: 20px;
+        color: white;
+        font-weight: 600;
+        text-align: center;
+        margin-top: 15px;
+        border: 1px solid #00ffff;
+        box-shadow: 0 0 15px #00ffff;
+        background: rgba(10, 10, 20, 0.8);
+    }
+    .stProgress > div > div > div > div {
+        background: linear-gradient(90deg, #00ffff, #ff00ff);
+    }
+    hr {
+        border: 0;
+        height: 1px;
+        background: linear-gradient(90deg, transparent, #ff00ff, transparent);
+    }
+    footer {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
 
-# --- Menu 2: Distribusi Data
-elif menu == "Distribusi Data":
-    st.header("📊 Distribusi Label dan Statistik Teks")
+# === HEADER (statis) ===
+st.markdown("<h1 class='title'>🤖 AI Text Detector 🤖</h1>", unsafe_allow_html=True)
+st.markdown("<p class='subtitle'>Deteksi apakah teks ini hasil <b>AI</b> atau tulisan <b>manusia</b></p>", unsafe_allow_html=True)
 
-    fig, ax = plt.subplots()
-    sns.countplot(data=df, x="generated", palette="Set2", ax=ax)
-    ax.set_title("Distribusi Label (AI vs Human)")
-    st.pyplot(fig)
-    st.markdown("---")
-    st.header("📊 Statistik Panjang Teks")
-    st.dataframe(df[["number_of_words", "number_of_char"]].describe())
+# === INPUT (statis) ===
+user_input = st.text_area("💬 Masukkan teks di bawah ini:", height=180, placeholder="Tulis teks di sini...")
+analyze_button = st.button("🔍 Analisis Teks", use_container_width=True)
 
-    fig2, ax2 = plt.subplots(1, 2, figsize=(10, 4))
-    sns.histplot(df["number_of_words"], bins=30, ax=ax2[0], color="skyblue")
-    ax2[0].set_title("Distribusi Jumlah Kata")
-    sns.histplot(df["number_of_char"], bins=30, ax=ax2[1], color="lightgreen")
-    ax2[1].set_title("Distribusi Jumlah Karakter")
-    st.pyplot(fig2)
+# === Placeholder untuk hasil (dinamis) ===
+result_placeholder = st.empty()
 
-# --- Menu 3: Evaluasi Model
-elif menu == "Evaluasi Model":
-    st.header("📈 Evaluasi Kinerja Model")
-    st.markdown("---")
+# === BAGIAN HASIL DINAMIS ===
+if analyze_button:
+    if user_input.strip() == "":
+        result_placeholder.warning("⚠️ Masukkan teks terlebih dahulu!")
+    else:
+        with result_placeholder.container():
+            with st.spinner("🤖 Sedang menganalisis dengan jaringan CNN..."):
+                prob = predict_ai_cnn(user_input)
 
-    # Tampilan metrik utama dalam 3 kolom
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("🎯 Akurasi", f"{metrics['accuracy']*100:.2f}%", "Performa keseluruhan")
-    with col2:
-        st.metric("⚖️ F1 Score", f"{metrics['f1']:.2f}", "Keseimbangan Precision & Recall")
-    with col3:
-        st.metric("💡 ROC-AUC", f"{metrics['roc_auc']:.2f}", "Kemampuan klasifikasi")
+            st.markdown("<hr>", unsafe_allow_html=True)
+            st.subheader("📊 Hasil Analisis:")
 
-    st.markdown("---")
-    st.subheader("📊 Classification Report")
+            st.progress(min(prob / 100, 1.0))
+            st.write(f"**Kemungkinan teks ini dibuat oleh AI: {prob:.2f}%**")
 
-    # Styling dataframe agar lebih enak dilihat
-    df_report = pd.DataFrame(metrics["report"]).transpose()
-    st.dataframe(
-        df_report.style.background_gradient(cmap="Blues").format(precision=2)
-    )
-
-# --- Menu 4: Prediksi Teks
-elif menu == "Prediksi Teks":
-    st.header("🤖 Predeksi Teks AI")
-    user_input = st.text_area("Masukkan teks yang ingin diuji:", height=200)
-
-    if st.button("Prediksi"):
-        if user_input.strip() == "":
-            st.warning("Masukkan teks terlebih dahulu!")
-        else:
-            prob = predict_ai_percentage(user_input)
-
-            # Buat diagram lingkaran
-            fig = go.Figure(go.Pie(
-                values=[prob, 100 - prob],
-                labels=["AI Generated", "Human Written"],
-                hole=0.7,
-                textinfo='none',
-                marker_colors=["#C93DFF", "#EAEAEA"]
-            ))
-
-            # Tampilkan persentase di tengah
-            fig.update_layout(
-                annotations=[dict(
-                    text=f"<b>{prob:.0f}%</b>",
-                    x=0.5, y=0.5, font_size=40, showarrow=False
-                )],
-                showlegend=False,
-                height=350,
-                margin=dict(t=0, b=0, l=0, r=0)
-            )
-
-            # Tampilkan grafik di Streamlit
-            st.plotly_chart(fig, use_container_width=True)
-
-            # Keterangan tambahan
             if prob > 80:
-                st.error(f"🔴 Teks ini kemungkinan **{prob:.0f}%** dibuat oleh AI.")
+                st.markdown(f"<div class='result-card' style='border-color:#ff0066;box-shadow:0 0 20px #ff0066;'>🔴 <b>Sangat mungkin dibuat oleh AI</b></div>", unsafe_allow_html=True)
+            elif prob > 50:
+                st.markdown(f"<div class='result-card' style='border-color:#ffcc00;box-shadow:0 0 20px #ffcc00;'>🟠 <b>Mungkin dibuat oleh AI</b></div>", unsafe_allow_html=True)
             else:
-                st.success(f"🟢 Teks ini kemungkinan **{prob:.0f}%** ditulis oleh manusia.")
+                st.markdown(f"<div class='result-card' style='border-color:#00ff99;box-shadow:0 0 20px #00ff99;'>🟢 <b>Kemungkinan ditulis oleh manusia</b></div>", unsafe_allow_html=True)
+
+# === FOOTER (statis) ===
+st.markdown("<hr>", unsafe_allow_html=True)
+st.markdown("<p style='text-align:center; color:#888;'>Made with 👹 by <b>Kelompok 3</b> | Deteksi Teks AI</p>", unsafe_allow_html=True)
