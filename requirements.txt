@@ -1,8 +1,4 @@
-pandas
-numpy
-matplotlib
-seaborn
 streamlit
-nltk
-scikit-learn
-plotly
+tensorflow
+numpy
+pickle-mixin
